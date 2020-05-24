@@ -2,3 +2,4 @@
 *.mp4
 data/frames/*
 data/*
+venv/*

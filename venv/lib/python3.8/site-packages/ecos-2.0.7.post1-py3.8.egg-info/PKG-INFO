@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: ecos
+Version: 2.0.7.post1
+Summary: This is the Python package for ECOS: Embedded Cone Solver. See Github page for more information.
+Home-page: http://github.com/embotech/ecos
+Author: Alexander Domahidi, Eric Chu, Han Wang, Santiago Akle
+Author-email: domahidi@embotech.com, echu@cs.stanford.edu, hanwang2@stanford.edu, tiagoakle@gmail.com
+License: GPLv3
+Description: UNKNOWN
+Platform: UNKNOWN

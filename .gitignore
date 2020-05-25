@@ -3,3 +3,4 @@
 data/frames/*
 data/*
 venv/*
+.vscode/

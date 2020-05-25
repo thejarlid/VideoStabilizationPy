@@ -1,24 +1,30 @@
 import sys
 import os
 import glob
+import re
 import cvxpy as cp
 import numpy as np
 import cv2 as cv
 import argparse
+import matplotlib.pyplot as plt
 
 
-def extract_frames_from_video(filename):
-  video = cv.VideoCapture(filename)
-
-  # creating a folder named data 
+def setup_folders():
   try: 
     if not os.path.exists('data'): 
       os.makedirs('data')
     if not os.path.exists('data/frames'):
       os.makedirs('data/frames')
+    if not os.path.exists('data/output'):
+      os.makedirs('data/output')
+    if not os.path.exists('data/matches'):
+      os.makedirs('data/matches')
   except OSError: 
-      print ('Error: Creating directory of data') 
+      print ('Error: Creating directory') 
 
+
+def extract_frames_from_video(filename):
+  video = cv.VideoCapture(filename)
   frames = []
   currentframe = 0
   while(True): 
@@ -41,8 +47,10 @@ def read_frames_from_dir(directory):
   # frames = [cv.imread(file) for file in sorted(glob.glob(directory + "/*.jpg"))]
   frames = []
   count = 0
-  for file in sorted(glob.glob(directory + "/*.jpg")):
-    if count >= 3000:
+  filenames = glob.glob(directory+ "/*.jpg")
+  filenames.sort(key=lambda f: int(re.sub('\D', '', f)))
+  for file in filenames:
+    if count >= 150:
       break
     frames.append(cv.imread(file))
     count+=1
@@ -65,15 +73,18 @@ def extract_features(frames):
   return features
 
 
-def compute_timewise_homographies(frames, features):
+def compute_timewise_homographies(frames, features, outputMatches=False):
   print ("finding matches between frames...")
   bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck = True)
   timewise_homographies = []
   for i in range(len(frames) - 1):
     matches = bf.match(features[i][1], features[i+1][1])
+    if outputMatches:
+      img3 = cv.drawMatches(frames[i], features[i][0], frames[i+1], features[i+1][0], matches, None, flags=2)
+      cv.imwrite('data/matches/matches_' + str(i) + "-" + str(i+1) + ".jpg", img3)
     src_pts = np.float32([ features[i][0][m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
     dst_pts = np.float32([ features[i+1][0][m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
-    M, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC,5.0)
+    M, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC, 5.0)
     if M is None:
       return timewise_homographies, i
     timewise_homographies.append(np.array(M))
@@ -118,17 +129,23 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   constraints = []
 
   # proximity constriants
+  U = np.array([0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0,
+                1, 0, 0, 0, 1, 0,
+                0, 1, 0, 0, 0, 1,
+                0, 0, 1, 0, 0, 1,
+                0, 0, 0, 1, -1, 0]).reshape(6, 6)
+  lb = np.array([0.9, -0.1, -0.1, 0.9, -0.1, -0.05])
+  ub = np.array([1.1, 0.1, 0.1, 1.1, 0.1, 0.05])
+
+  for i in range(n):
+    res = smooth_path[i] @ U
+    for j in range(6):
+      constraints.append(res[j] >= lb[j])
+      constraints.append(res[j] <= ub[j])
 
   
   # inclusion constraints for the crop corners
-  # centre_pt_original = (round(frame_dimensions[1]/2), round(frame_dimensions[0]/2))     # (x, y)
-  # new_dimensions = (frame_dimensions[1] * crop_ratio, frame_dimensions[0] * crop_ratio) # (w x h)
-
-  # # crop corners
-  # top_left = (centre_pt_original[0] - new_dimensions[0]/2, centre_pt_original[1] - new_dimensions[1]/2)
-  # top_right = (centre_pt_original[0] + new_dimensions[0]/2, centre_pt_original[1] - new_dimensions[1]/2)
-  # bottom_left = (centre_pt_original[0] - new_dimensions[0]/2, centre_pt_original[1] + new_dimensions[1]/2)
-  # bottom_right = (centre_pt_original[0] + new_dimensions[0]/2, centre_pt_original[1] + new_dimensions[1]/2)
   corners = get_corner_crop_pts(frame_dimensions)
 
   for corner in corners:
@@ -182,24 +199,110 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
       constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) <= slack_var_3[i, j])
       constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) >= -slack_var_3[i, j])
     
+    for i in range(n-3, n):
+      constraints.append(smooth_path[i, 5] == smooth_path[n-1, 5])
+    
   problem = cp.Problem(objective, constraints)
-  problem.solve(parallel=True)
+  problem.solve(parallel=True, verbose=True)
   print("status:", problem.status)
   print("optimal value", problem.value)
   print(smooth_path.value)
-  return smooth_path
+  return convert_path_to_homography(smooth_path.value, n)
 
 
-def smoot(original_frames, smooth_path, crop_ratio=0.8):
-  pass
+def convert_path_to_homography(path, n):
+  smooth_homography = []
+  for i in range(n):
+    smooth_homography.append(np.array([path[i, 2], path[i, 4], 0, 
+                                      path[i, 3], path[i, 5], 0, 
+                                      path[i, 0], path[i, 1], 1]).reshape(3, 3))
+  return smooth_homography
+
+
+def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
+  print("smoothing new frames...")
+
+  n = len(original_frames)
+  w, h, _ = original_frames[0].shape
+  centre_x, centre_y = (w/2, h/2)
+  displacement_x, displacement_y = (crop_ratio * w)/2, (crop_ratio * h)/2
+
+  top_left = np.array([centre_x - displacement_x, centre_y - displacement_y, 1])
+  top_right = np.array([centre_x + displacement_x, centre_y - displacement_y, 1])
+  bottom_left = np.array([centre_x - displacement_x, centre_y + displacement_y, 1])
+  bottom_right = np.array([centre_x + displacement_x, centre_y + displacement_y, 1])
+  crop_corners = [top_left, top_right, bottom_left, bottom_right]
+  
+  dst_corners = np.array([np.array([0, 0]), np.array([w, 0]), np.array([0, h]), np.array([w, h])]).astype(np.float32)
+
+  new_frames = []
+  for i in range(1, n):
+    projected_corners = []
+    for corner in crop_corners:
+      projected_corners.append(corner.dot(smooth_path[i-1]))
+    src_corners = np.array([[projected_corners[0][0], projected_corners[0][1]],
+                            [projected_corners[1][0], projected_corners[1][1]], 
+                            [projected_corners[2][0], projected_corners[2][1]],
+                            [projected_corners[3][0], projected_corners[3][1]]]).astype(np.float32)
+    
+    H, _ = cv.findHomography(src_corners, dst_corners, cv.RANSAC, 5.0)
+    warp_frame = cv.warpPerspective(original_frames[i], H, (original_frames[i].shape[1], original_frames[i].shape[0]))
+    frame_filename = './data/output/frame' + str(i) + '.jpg'
+    cv.imwrite(frame_filename, warp_frame)
+    new_frames.append(warp_frame)
+  return new_frames
+
+
+def plot_paths(timewise_homographies, smooth_path):
+  fig, axs = plt.subplots(2)
+  n = len(timewise_homographies) + 1
+  original_a = np.zeros((n - 1, 1))
+  x = np.array([0, 0, 1])
+  C = []
+  for i in range(n-1):
+    x = x.dot(timewise_homographies[i])
+    C.append(x)
+    original_a[i] = x[1]
+
+  new_a = np.zeros((n - 1, 1))
+  for i in range(n-1):
+    y = C[i].dot(smooth_path[i])
+    new_a[i] = y[1]
+
+  axs[0].plot(np.arange(0, n-1), original_a, 'o-')
+  axs[0].plot(np.arange(0, n-1), new_a, 'y-')
+
+  original_a = np.zeros((n - 1, 1))
+  C = []
+  x = np.array([0, 0, 1])
+  for i in range(n-1):
+    x = x.dot(timewise_homographies[i])
+    C.append(x)
+    original_a[i] = x[0]
+  
+  new_a = np.zeros((n-1, 1))
+  for i in range(n-1):
+    y = C[i].dot(smooth_path[i])
+    new_a[i] = y[0]
+
+  axs[1].plot(np.arange(0, n-1), original_a, 'o-')
+  axs[1].plot(np.arange(0, n-1), new_a, 'x-')
+  plt.savefig('motion.png')
+  plt.show()
 
 
 def main():
+  setup_folders()
   original_frames = read_frames_from_dir(sys.argv[1])
   features = extract_features(original_frames)
-  timewise_homographies, count = compute_timewise_homographies(original_frames, features)
+  timewise_homographies, _ = compute_timewise_homographies(original_frames, features, True)
   smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
-
+  # smooth_path = []
+  # for i in range(len(original_frames)):
+  #   smooth_path.append(np.random.rand(3, 3))
+  apply_smoothing(original_frames, smooth_path)
+  plot_paths(timewise_homographies, smooth_path)
+  
 
 if __name__ == "__main__":
   main()

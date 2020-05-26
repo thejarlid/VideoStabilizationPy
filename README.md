@@ -6,7 +6,7 @@ This is an implementation of the methods presented in [this research paper](http
 
 This repo uses python 3's virtual environment and pip to allow a sandbox environment of its own dependencies which have been frozen into the requirements.txt file. 
 
-Inside the cloned directory run the following:
+Inside the cloned directory run the following in the terminal:
 
 ```bash
 python3 -m venv venv/               # you can change venv/ to whatever you want your virtual environment directory to be called

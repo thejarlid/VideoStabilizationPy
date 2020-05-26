@@ -49,7 +49,7 @@ def read_frames_from_dir(directory):
   filenames = glob.glob(directory+ "/*.jpg")
   filenames.sort(key=lambda f: int(re.sub('\D', '', f)))
   for file in filenames:
-    if count >= 150:
+    if count >= 300:
       break
     frames.append(cv.imread(file))
     count+=1
@@ -58,36 +58,38 @@ def read_frames_from_dir(directory):
 
 
 def extract_features(frames):
-#   print ("extracting features...")
-#   features = []
-#   for i in range(len(frames)):
-#     orb = cv.ORB_create()
-#     gray = cv.cvtColor(frames[i], cv.COLOR_BGR2GRAY)
-#     kp, des = orb.detectAndCompute(gray, None)
-#     while np.array(kp).shape[0] == 0:
-#       orb_less_accurate = cv.ORB_create(nfeatures=1000, scoreType=cv.ORB_FAST_SCORE)
-#       print("frame: " + str(i) + " has no keypoints")
-#       kp, des = orb_less_accurate.detectAndCompute(gray, None)
-#     features.append((kp, des))
-#   return features
+  print ("extracting features...")
+  features = []
+  for i in range(len(frames)):
+    orb = cv.ORB_create()
+    gray = cv.cvtColor(frames[i], cv.COLOR_BGR2GRAY)
+    kp, des = orb.detectAndCompute(gray, None)
+    while np.array(kp).shape[0] == 0:
+      orb_less_accurate = cv.ORB_create(nfeatures=1000, scoreType=cv.ORB_FAST_SCORE)
+      print("frame: " + str(i) + " has no keypoints")
+      kp, des = orb_less_accurate.detectAndCompute(gray, None)
+    features.append((kp, des))
+  return features
 
 
 def compute_timewise_homographies(frames, features, outputMatches=False):
-#   print ("finding matches between frames...")
-#   bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck = True)
-#   timewise_homographies = []
-#   for i in range(len(frames) - 1):
-#     matches = bf.match(features[i][1], features[i+1][1])
-#     if outputMatches:
-#       img3 = cv.drawMatches(frames[i], features[i][0], frames[i+1], features[i+1][0], matches, None, flags=2)
-#       cv.imwrite('data/matches/matches_' + str(i) + "-" + str(i+1) + ".jpg", img3)
-#     src_pts = np.float32([ features[i][0][m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
-#     dst_pts = np.float32([ features[i+1][0][m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
-#     M, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC, 5.0)
-#     if M is None:
-#       return timewise_homographies, i
-#     timewise_homographies.append(np.array(M))
-#   return timewise_homographies, len(frames) - 1
+  print ("finding matches between frames...")
+  bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck = True)
+  timewise_homographies = []
+  for i in range(len(frames) - 1):
+    matches = bf.match(features[i][1], features[i+1][1])
+    if outputMatches:
+      img3 = cv.drawMatches(frames[i], features[i][0], frames[i+1], features[i+1][0], matches, None, flags=2)
+      cv.imwrite('data/matches/matches_' + str(i) + "-" + str(i+1) + ".jpg", img3)
+    src_pts = np.float32([ features[i][0][m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
+    dst_pts = np.float32([ features[i+1][0][m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
+    M, _ = cv.estimateAffinePartial2D(src_pts, dst_pts, method=cv.RANSAC)
+    # M, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC, 5.0)
+    print(M)
+    if M is None:
+      return timewise_homographies, i
+    timewise_homographies.append(np.transpose(M))
+  return timewise_homographies, len(frames) - 1
 
 
 def get_corner_crop_pts(frame_dimensions, crop_ratio=0.8):
@@ -150,9 +152,9 @@ def main():
   original_frames = read_frames_from_dir(sys.argv[1])
   features = extract_features(original_frames)
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features, True)
-  smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
-  apply_smoothing(original_frames, smooth_path)
-  plot_paths(timewise_homographies, smooth_path)
+  # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
+  apply_smoothing(original_frames, timewise_homographies)
+  # plot_paths(timewise_homographies, smooth_path)
   
 
 if __name__ == "__main__":

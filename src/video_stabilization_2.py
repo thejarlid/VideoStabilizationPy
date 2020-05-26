@@ -2,9 +2,10 @@ import sys
 import os
 import glob
 import re
+import cvxpy as cp
 import numpy as np
 import cv2 as cv
-import argparse
+import argparse as ap
 import matplotlib.pyplot as plt
 
 
@@ -43,7 +44,6 @@ def read_frames_from_dir(directory):
   if not os.path.exists(directory):
     print ("Error directory does not exist")
     exit()
-  # frames = [cv.imread(file) for file in sorted(glob.glob(directory + "/*.jpg"))]
   frames = []
   count = 0
   filenames = glob.glob(directory+ "/*.jpg")
@@ -105,7 +105,118 @@ def get_corner_crop_pts(frame_dimensions, crop_ratio=0.8):
 
 
 def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0.8):
-    pass
+  print("computing smooth path...")
+
+  n = len(timewise_homographies)
+
+  weight_constant = 10
+  weight_linear = 1
+  weight_parabolic =  100
+
+  affine_weights_1 = np.transpose(np.array([1, 1, 100, 100, 100, 100]))
+  affine_weights_2 = np.transpose(np.array([1, 1, 100, 100, 100, 100]))
+  affine_weights_3 = np.transpose(np.array([1, 1, 100, 100, 100, 100]))
+
+  smooth_path = cp.Variable((n, 6))
+  slack_var_1 = cp.Variable((n, 6))
+  slack_var_2 = cp.Variable((n, 6))
+  slack_var_3 = cp.Variable((n, 6))
+
+  objective = cp.Minimize(cp.sum((weight_constant * (slack_var_1 @ affine_weights_1)) +
+                                  (weight_linear * (slack_var_2 @ affine_weights_2)) +
+                                  (weight_parabolic * (slack_var_3 @ affine_weights_3)), axis=0))
+
+  constraints = []
+
+  # proximity constriants
+  U = np.array([0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0,
+                1, 0, 0, 0, 1, 0,
+                0, 1, 0, 0, 0, 1,
+                0, 0, 1, 0, 0, 1,
+                0, 0, 0, 1, -1, 0]).reshape(6, 6)
+  lb = np.array([0.9, -0.1, -0.1, 0.9, -0.1, -0.05])
+  ub = np.array([1.1, 0.1, 0.1, 1.1, 0.1, 0.05])
+
+  for i in range(n):
+    res = smooth_path[i] @ U
+    for j in range(6):
+      constraints.append(res[j] >= lb[j])
+      constraints.append(res[j] <= ub[j])
+
+  
+  # inclusion constraints for the crop corners
+  corners = get_corner_crop_pts(frame_dimensions)
+
+  for corner in corners:
+    for i in range(n):
+        x, y = corner
+        horizontal = np.array([1, 0, x, y, 0, 0])
+        vertical = np.array([0, 1, 0, 0, x, y])
+        constraints.append(horizontal @ smooth_path[i] >= 0)
+        constraints.append(vertical @ smooth_path[i] >= 0)
+        constraints.append(horizontal @ smooth_path[i] <= frame_dimensions[1])
+        constraints.append(vertical @ smooth_path[i] <= frame_dimensions[0])
+  
+  # Smoothness constraints
+  constraints.append(slack_var_1 >= 0)
+  constraints.append(slack_var_2 >= 0)
+  constraints.append(slack_var_3 >= 0)
+
+  for i in range(n - 3):
+    # format B_tx so that when multiplied by the timewise homography to get the residual the affine
+    # transform is kept
+    B_t = np.array([smooth_path[i, 2], smooth_path[i, 4], 0, 
+                    smooth_path[i, 3], smooth_path[i, 5], 0, 
+                    smooth_path[i, 0], smooth_path[i, 1], 1]).reshape((3,3))
+    B_t1 = np.array([smooth_path[i+1, 2], smooth_path[i+1, 4], 0, 
+                    smooth_path[i+1, 3], smooth_path[i+1, 5], 0, 
+                    smooth_path[i+1, 0], smooth_path[i+1, 1], 1]).reshape((3,3))
+    B_t2 = np.array([smooth_path[i+2, 2], smooth_path[i+2, 4], 0, 
+                    smooth_path[i+2, 3], smooth_path[i+2, 5], 0, 
+                    smooth_path[i+2, 0], smooth_path[i+2, 1], 1]).reshape((3,3))
+    B_t3 = np.array([smooth_path[i+3, 2], smooth_path[i+3, 4], 0, 
+                    smooth_path[i+3, 3], smooth_path[i+3, 5], 0, 
+                    smooth_path[i+3, 0], smooth_path[i+3, 1], 1]).reshape((3,3))
+
+    residual_t = np.array(timewise_homographies[i + 1]).dot(B_t1) - B_t
+    residual_t1 = np.array(timewise_homographies[i + 2]).dot(B_t2) - B_t1
+    residual_t2 = np.array(timewise_homographies[i + 3]).dot(B_t3) - B_t2
+    residual_t = np.array([residual_t[2, 0], residual_t[2, 1], residual_t[0, 0], residual_t[1, 0], residual_t[0, 1], residual_t[1, 1]])
+    residual_t1 = np.array([residual_t1[2, 0], residual_t1[2, 1], residual_t1[0, 0], residual_t1[1, 0], residual_t1[0, 1], residual_t1[1, 1]])
+    residual_t2 = np.array([residual_t2[2, 0], residual_t2[2, 1], residual_t2[0, 0], residual_t2[1, 0], residual_t2[0, 1], residual_t2[1, 1]])
+
+    # this is where the actual smoothness constraint is obtained from the residuals
+    # i.e. this is where we summarized the following:
+    #  -e_t1 <= R_t(p) < et1
+    #  -e_t2 <= R_t1(p) - R_t(p) < et2
+    #  -e_t3 <= R_t2(p) - 2R_t1(p) + R_t(p) < et3
+    for j in range(6):
+      constraints.append(residual_t[j] <= slack_var_1[i, j])
+      constraints.append(residual_t[j] >= -slack_var_1[i, j])
+      constraints.append((residual_t1[j] - residual_t[j]) <= slack_var_2[i, j])
+      constraints.append((residual_t1[j] - residual_t[j]) >= -slack_var_2[i, j])
+      constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) <= slack_var_3[i, j])
+      constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) >= -slack_var_3[i, j])
+    
+    for i in range(n-3, n):
+      constraints.append(smooth_path[i, 5] == smooth_path[n-1, 5])
+    
+  problem = cp.Problem(objective, constraints)
+  problem.solve(parallel=True, verbose=True)
+  print("status:", problem.status)
+  print("optimal value", problem.value)
+  print(smooth_path.value)
+  return convert_path_to_homography(smooth_path.value, n)
+
+
+def convert_path_to_homography(path, n):
+  smooth_homography = []
+  for i in range(n):
+    smooth_homography.append(np.array([path[i, 2], path[i, 4], 0, 
+                                      path[i, 3], path[i, 5], 0, 
+                                      path[i, 0], path[i, 1], 1]).reshape(3, 3))
+  return smooth_homography
 
 
 def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
@@ -168,8 +279,8 @@ def main():
   original_frames = read_frames_from_dir(sys.argv[1])
   features = extract_features(original_frames)
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features, True)
-  # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
-  # apply_smoothing(original_frames, timewise_homographies)
+  smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
+  apply_smoothing(original_frames, smooth_path)
   graph_paths(timewise_homographies)
   
 

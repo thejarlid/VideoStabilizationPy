@@ -84,10 +84,10 @@ def compute_timewise_homographies(frames, features, outputMatches=False):
       cv.imwrite('data/matches/matches_' + str(i) + "-" + str(i+1) + ".jpg", img3)
     src_pts = np.float32([ features[i][0][m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
     dst_pts = np.float32([ features[i+1][0][m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
-    M, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC, 5.0)
+    M, _ = cv.estimateAffinePartial2D(src_pts, dst_pts, method=cv.RANSAC)
     if M is None:
       return timewise_homographies, i
-    timewise_homographies.append(np.array(M))
+    timewise_homographies.append(np.transpose(M))
   return timewise_homographies, len(frames) - 1
 
 

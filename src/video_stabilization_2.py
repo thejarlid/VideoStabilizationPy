@@ -84,11 +84,10 @@ def compute_timewise_homographies(frames, features, outputMatches=False):
     src_pts = np.float32([ features[i][0][m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
     dst_pts = np.float32([ features[i+1][0][m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
     M, _ = cv.estimateAffinePartial2D(src_pts, dst_pts, method=cv.RANSAC)
-    # M, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC, 5.0)
-    print(M)
     if M is None:
       return timewise_homographies, i
-    timewise_homographies.append(np.transpose(M))
+    H = np.append(M, np.array([0, 0, 1]).reshape((1,3)), axis=0)
+    timewise_homographies.append(np.transpose(H))
   return timewise_homographies, len(frames) - 1
 
 
@@ -143,8 +142,25 @@ def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
   return new_frames
 
 
-def plot_paths(timewise_homographies, smooth_path):
-    pass
+def graph_paths(timewise_homographies=[], smooth_path=[]):
+  print("graphing path...")
+  n = len(timewise_homographies)
+  
+  original_y_path = np.zeros(n-1)
+  original_x_path = np.zeros(n-1)
+  C = []
+  pt = np.array([0, 0, 1]).reshape((1,3))
+  for i in range(n-1):
+    pt = pt.dot(timewise_homographies[i]).reshape((3,))
+    print(pt)
+    original_x_path[i] = pt[0]
+    original_y_path[i] = pt[1]
+
+  fig, axs = plt.subplots(2)
+  axs[0].plot(np.arange(0, n-1), original_y_path, 'o-')
+  axs[1].plot(np.arange(0, n-1), original_x_path, 'o-')
+  plt.savefig('motion.png')
+  plt.show()
 
 
 def main():
@@ -153,8 +169,8 @@ def main():
   features = extract_features(original_frames)
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features, True)
   # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
-  apply_smoothing(original_frames, timewise_homographies)
-  # plot_paths(timewise_homographies, smooth_path)
+  # apply_smoothing(original_frames, timewise_homographies)
+  graph_paths(timewise_homographies)
   
 
 if __name__ == "__main__":

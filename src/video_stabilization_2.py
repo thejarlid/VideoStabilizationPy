@@ -113,8 +113,6 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   weight_linear = 1
   weight_parabolic =  100
   affine_weights = np.transpose([1, 1, 100, 100, 100, 100])
-  # affine_weights_2 = np.transpose([1, 1, 100, 100, 100, 100])
-  # affine_weights_3 = np.transpose([1, 1, 100, 100, 100, 100])
 
   smooth_path = cp.Variable((n, 6))
   slack_var_1 = cp.Variable((n, 6))
@@ -144,14 +142,13 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   corners = get_corner_crop_pts(frame_dimensions)
 
   for corner in corners:
-    for i in range(n):
-        x, y = corner
-        horizontal = np.array([1, 0, x, y, 0, 0])
-        vertical = np.array([0, 1, 0, 0, x, y])
-        constraints.append(horizontal @ smooth_path[i] >= 0)
-        constraints.append(vertical @ smooth_path[i] >= 0)
-        constraints.append(horizontal @ smooth_path[i] <= frame_dimensions[1])
-        constraints.append(vertical @ smooth_path[i] <= frame_dimensions[0])
+    x, y = corner
+    projected_x = smooth_path @ np.transpose([1, 0, x, y, 0, 0])
+    projected_y = smooth_path @ np.transpose([0, 1, 0, 0, x, y])
+    constraints.append(projected_x >= 0)
+    constraints.append(projected_y >= 0)
+    constraints.append(projected_x <= frame_dimensions[1])
+    constraints.append(projected_y <= frame_dimensions[0])
   
   # Smoothness constraints
   constraints.append(slack_var_1 >= 0)

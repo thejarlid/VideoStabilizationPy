@@ -241,8 +241,7 @@ def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
   bottom_left = np.array([centre_x - displacement_x, centre_y + displacement_y, 1])
   bottom_right = np.array([centre_x + displacement_x, centre_y + displacement_y, 1])
   crop_corners = [top_left, top_right, bottom_left, bottom_right]
-  
-  dst_corners = np.array([np.array([0, 0]), np.array([w, 0]), np.array([0, h]), np.array([w, h])]).astype(np.float32)
+  dst_corners = np.array([[0, 0], [w, 0], [0, h], [w, h]]).astype(np.float32)
 
   new_frames = []
   for i in range(1, n):
@@ -279,9 +278,9 @@ def graph_paths(timewise_homographies=[], smooth_path=[]):
     smooth_y_path[i] = smooth_pt[1]
   fig, axs = plt.subplots(2)
   axs[0].plot(np.arange(0, n-1), original_x_path, 'o-')
-  axs[0].plot(np.arange(0, n-1), smooth_x_path, 'x-')
+  axs[0].plot(np.arange(0, n-1), smooth_x_path, '-')
   axs[1].plot(np.arange(0, n-1), original_y_path, 'o-')
-  axs[1].plot(np.arange(0, n-1), smooth_y_path, 'y-')
+  axs[1].plot(np.arange(0, n-1), smooth_y_path, '-')
   plt.savefig('motion.png')
   plt.show()
 
@@ -291,9 +290,9 @@ def main():
   original_frames = read_frames_from_dir(sys.argv[1])
   features = extract_features(original_frames)
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features)
-  # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
-  # apply_smoothing(original_frames, timewise_homographies)
-  graph_paths(timewise_homographies)
+  smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
+  apply_smoothing(original_frames, smooth_path)
+  graph_paths(timewise_homographies, smooth_path)
   
 
 if __name__ == "__main__":

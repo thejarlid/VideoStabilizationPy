@@ -115,9 +115,9 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   affine_weights = np.transpose([1, 1, 100, 100, 100, 100])
 
   smooth_path = cp.Variable((n, 6))
-  slack_var_1 = cp.Variable((n, 6))
-  slack_var_2 = cp.Variable((n, 6))
-  slack_var_3 = cp.Variable((n, 6))
+  slack_var_1 = cp.Variable((n-3, 6))
+  slack_var_2 = cp.Variable((n-3, 6))
+  slack_var_3 = cp.Variable((n-3, 6))
 
   objective = cp.Minimize(cp.sum((weight_constant * (slack_var_1 @ affine_weights)) +
                                   (weight_linear * (slack_var_2 @ affine_weights)) +
@@ -140,7 +140,6 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   
   # inclusion constraints for the crop corners
   corners = get_corner_crop_pts(frame_dimensions)
-
   for corner in corners:
     x, y = corner
     projected_x = smooth_path @ np.transpose([1, 0, x, y, 0, 0])
@@ -155,25 +154,23 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   constraints.append(slack_var_2 >= 0)
   constraints.append(slack_var_3 >= 0)
 
+  R_t = []
+  R_t1 = []
+  R_t2 = []
   for i in range(n - 3):
     # format B_tx so that when multiplied by the timewise homography to get the residual the affine
     # transform is kept
-    B_t = np.array([smooth_path[i, 2], smooth_path[i, 4], 0, 
-                    smooth_path[i, 3], smooth_path[i, 5], 0, 
-                    smooth_path[i, 0], smooth_path[i, 1], 1]).reshape((3,3))
-    B_t1 = np.array([smooth_path[i+1, 2], smooth_path[i+1, 4], 0, 
-                    smooth_path[i+1, 3], smooth_path[i+1, 5], 0, 
-                    smooth_path[i+1, 0], smooth_path[i+1, 1], 1]).reshape((3,3))
-    B_t2 = np.array([smooth_path[i+2, 2], smooth_path[i+2, 4], 0, 
-                    smooth_path[i+2, 3], smooth_path[i+2, 5], 0, 
-                    smooth_path[i+2, 0], smooth_path[i+2, 1], 1]).reshape((3,3))
-    B_t3 = np.array([smooth_path[i+3, 2], smooth_path[i+3, 4], 0, 
-                    smooth_path[i+3, 3], smooth_path[i+3, 5], 0, 
-                    smooth_path[i+3, 0], smooth_path[i+3, 1], 1]).reshape((3,3))
+    B_t = np.array([smooth_path[i, 2], smooth_path[i, 4], 0, smooth_path[i, 3], smooth_path[i, 5], 0, smooth_path[i, 0], smooth_path[i, 1], 1]).reshape((3,3))
+    B_t1 = np.array([smooth_path[i+1, 2], smooth_path[i+1, 4], 0, smooth_path[i+1, 3], smooth_path[i+1, 5], 0, smooth_path[i+1, 0], smooth_path[i+1, 1], 1]).reshape((3,3))
+    B_t2 = np.array([smooth_path[i+2, 2], smooth_path[i+2, 4], 0, smooth_path[i+2, 3], smooth_path[i+2, 5], 0, smooth_path[i+2, 0], smooth_path[i+2, 1], 1]).reshape((3,3))
+    B_t3 = np.array([smooth_path[i+3, 2], smooth_path[i+3, 4], 0, smooth_path[i+3, 3], smooth_path[i+3, 5], 0, smooth_path[i+3, 0], smooth_path[i+3, 1], 1]).reshape((3,3))
 
     residual_t = timewise_homographies[i + 1] @ B_t1  - B_t
     residual_t1 = timewise_homographies[i + 2] @ B_t2 - B_t1
     residual_t2 = timewise_homographies[i + 3] @ B_t3 - B_t2
+    # R_t.append([residual_t[2, 0], residual_t[2, 1], residual_t[0, 0], residual_t[1, 0], residual_t[0, 1], residual_t[1, 1]])
+    # R_t1.append([residual_t1[2, 0], residual_t1[2, 1], residual_t1[0, 0], residual_t1[1, 0], residual_t1[0, 1], residual_t1[1, 1]])
+    # R_t2.append([residual_t2[2, 0], residual_t2[2, 1], residual_t2[0, 0], residual_t2[1, 0], residual_t2[0, 1], residual_t2[1, 1]])
     residual_t = np.array([residual_t[2, 0], residual_t[2, 1], residual_t[0, 0], residual_t[1, 0], residual_t[0, 1], residual_t[1, 1]])
     residual_t1 = np.array([residual_t1[2, 0], residual_t1[2, 1], residual_t1[0, 0], residual_t1[1, 0], residual_t1[0, 1], residual_t1[1, 1]])
     residual_t2 = np.array([residual_t2[2, 0], residual_t2[2, 1], residual_t2[0, 0], residual_t2[1, 0], residual_t2[0, 1], residual_t2[1, 1]])
@@ -197,10 +194,23 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
       constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) <= slack_var_3[i, j])
       constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) >= -slack_var_3[i, j])
     
-    for i in range(n-3, n):
-      constraints.append(smooth_path[i, 5] == smooth_path[n-1, 5])
+  for i in range(n-3, n):
+    constraints.append(smooth_path[i, 5] == smooth_path[n-1, 5])
+
+  # R_t = np.array(R_t)
+  # R_t1 = np.array(R_t1)
+  # R_t2 = np.array(R_t2)
+  # print(R_t.shape)
+  # print(slack_var_1.shape)
+  # # constraints.append(R_t <= slack_var_1)
+  # # constraints.append(R_t >= -slack_var_1)
+  # # constraints.append((residual_t1 - residual_t) <= slack_var_2[i])
+  # # constraints.append((residual_t1 - residual_t) >= -slack_var_2[i])
+  # # constraints.append((residual_t2 - 2*residual_t1 + residual_t) <= slack_var_3[i])
+  # # constraints.append((residual_t2 - 2*residual_t1 + residual_t) >= -slack_var_3[i])
+  # # for i in range(n):
+  # constraints.append(slack_var_1 >= R_t)
   
-  return []
   problem = cp.Problem(objective, constraints)
   problem.solve(parallel=True, verbose=True)
   print("status:", problem.status)
@@ -255,20 +265,23 @@ def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
 def graph_paths(timewise_homographies=[], smooth_path=[]):
   print("graphing path...")
   n = len(timewise_homographies)
-  
-  original_y_path = np.zeros(n-1)
   original_x_path = np.zeros(n-1)
-  C = []
+  original_y_path = np.zeros(n-1)
+  smooth_x_path = np.zeros(n-1)
+  smooth_y_path = np.zeros(n-1)
   pt = np.array([0, 0, 1]).reshape((1,3))
   for i in range(n-1):
     pt = pt.dot(timewise_homographies[i]).reshape((3,))
-    print(pt)
     original_x_path[i] = pt[0]
     original_y_path[i] = pt[1]
-
+    smooth_pt = pt.reshape((1,3)).dot(smooth_path[i]).reshape((3,))
+    smooth_x_path[i] = smooth_pt[0]
+    smooth_y_path[i] = smooth_pt[1]
   fig, axs = plt.subplots(2)
-  axs[0].plot(np.arange(0, n-1), original_y_path, 'o-')
-  axs[1].plot(np.arange(0, n-1), original_x_path, 'o-')
+  axs[0].plot(np.arange(0, n-1), original_x_path, 'o-')
+  axs[0].plot(np.arange(0, n-1), smooth_x_path, 'x-')
+  axs[1].plot(np.arange(0, n-1), original_y_path, 'o-')
+  axs[1].plot(np.arange(0, n-1), smooth_y_path, 'y-')
   plt.savefig('motion.png')
   plt.show()
 
@@ -278,9 +291,9 @@ def main():
   original_frames = read_frames_from_dir(sys.argv[1])
   features = extract_features(original_frames)
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features)
-  smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
+  # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
   # apply_smoothing(original_frames, timewise_homographies)
-  # graph_paths(timewise_homographies)
+  graph_paths(timewise_homographies)
   
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import os
 import glob
 import re
 import cvxpy as cp
+import cvxopt as cvx
 import numpy as np
 import cv2 as cv
 import argparse as ap
@@ -83,7 +84,7 @@ def compute_timewise_homographies(frames, features, outputMatches=False):
       cv.imwrite('data/matches/matches_' + str(i) + "-" + str(i+1) + ".jpg", img3)
     src_pts = np.float32([ features[i][0][m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
     dst_pts = np.float32([ features[i+1][0][m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
-    M, _ = cv.estimateAffinePartial2D(src_pts, dst_pts, method=cv.RANSAC)
+    M, _ = cv.estimateAffine2D(src_pts, dst_pts, method=cv.RANSAC)
     if M is None:
       return timewise_homographies, i
     H = np.append(M, np.array([0, 0, 1]).reshape((1,3)), axis=0)
@@ -115,9 +116,9 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   affine_weights = np.transpose([1, 1, 100, 100, 100, 100])
 
   smooth_path = cp.Variable((n, 6))
-  slack_var_1 = cp.Variable((n-3, 6))
-  slack_var_2 = cp.Variable((n-3, 6))
-  slack_var_3 = cp.Variable((n-3, 6))
+  slack_var_1 = cp.Variable((n, 6))
+  slack_var_2 = cp.Variable((n, 6))
+  slack_var_3 = cp.Variable((n, 6))
 
   objective = cp.Minimize(cp.sum((weight_constant * (slack_var_1 @ affine_weights)) +
                                   (weight_linear * (slack_var_2 @ affine_weights)) +
@@ -135,6 +136,12 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   ub = np.array([1.1, 0.1, 0.1, 1.1, 0.1, 0.05])
   proximity = smooth_path @ U
   for i in range(n):
+    print(proximity[i, :])
+    print(proximity[i, :].shape)
+    print(type(proximity[i, :]))
+    print(lb)
+    print(lb.shape)
+    print(type(lb))
     constraints.append(proximity[i, :] >= lb)
     constraints.append(proximity[i, :] <= ub)
   
@@ -154,9 +161,6 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   constraints.append(slack_var_2 >= 0)
   constraints.append(slack_var_3 >= 0)
 
-  R_t = []
-  R_t1 = []
-  R_t2 = []
   for i in range(n - 3):
     # format B_tx so that when multiplied by the timewise homography to get the residual the affine
     # transform is kept
@@ -168,24 +172,22 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
     residual_t = timewise_homographies[i + 1] @ B_t1  - B_t
     residual_t1 = timewise_homographies[i + 2] @ B_t2 - B_t1
     residual_t2 = timewise_homographies[i + 3] @ B_t3 - B_t2
-    # R_t.append([residual_t[2, 0], residual_t[2, 1], residual_t[0, 0], residual_t[1, 0], residual_t[0, 1], residual_t[1, 1]])
-    # R_t1.append([residual_t1[2, 0], residual_t1[2, 1], residual_t1[0, 0], residual_t1[1, 0], residual_t1[0, 1], residual_t1[1, 1]])
-    # R_t2.append([residual_t2[2, 0], residual_t2[2, 1], residual_t2[0, 0], residual_t2[1, 0], residual_t2[0, 1], residual_t2[1, 1]])
     residual_t = np.array([residual_t[2, 0], residual_t[2, 1], residual_t[0, 0], residual_t[1, 0], residual_t[0, 1], residual_t[1, 1]])
     residual_t1 = np.array([residual_t1[2, 0], residual_t1[2, 1], residual_t1[0, 0], residual_t1[1, 0], residual_t1[0, 1], residual_t1[1, 1]])
     residual_t2 = np.array([residual_t2[2, 0], residual_t2[2, 1], residual_t2[0, 0], residual_t2[1, 0], residual_t2[0, 1], residual_t2[1, 1]])
 
     # this is where the actual smoothness constraint is obtained from the residuals
     # i.e. this is where we summarized the following:
-    #  -e_t1 <= R_t(p) < et1
-    #  -e_t2 <= R_t1(p) - R_t(p) < et2
-    #  -e_t3 <= R_t2(p) - 2R_t1(p) + R_t(p) < et3
-    # constraints.append(residual_t <= np.array(slack_var_1[i]))
-    # constraints.append(residual_t >= -slack_var_1[i])
-    # constraints.append((residual_t1 - residual_t) <= slack_var_2[i])
-    # constraints.append((residual_t1 - residual_t) >= -slack_var_2[i])
-    # constraints.append((residual_t2 - 2*residual_t1 + residual_t) <= slack_var_3[i])
-    # constraints.append((residual_t2 - 2*residual_t1 + residual_t) >= -slack_var_3[i])
+    #  -e_t1 <= R_t(p) < e_t1
+    #  -e_t2 <= R_t1(p) - R_t(p) < e_t2
+    #  -e_t3 <= R_t2(p) - 2R_t1(p) + R_t(p) < e_t3
+    # print(slack_var_1)
+    # print(slack_var_1[i, :])
+    # print(slack_var_1[i])
+    # print(np.array(slack_var_1[i, :]))
+    # print(np.array(slack_var_1[i]))
+    # print("-------------")
+    # constraints.append(residual_t <= np.array(slack_var_1[i, :]).reshape((6,)))
     for j in range(6):
       constraints.append(residual_t[j] <= slack_var_1[i, j])
       constraints.append(residual_t[j] >= -slack_var_1[i, j])
@@ -196,20 +198,6 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
     
   for i in range(n-3, n):
     constraints.append(smooth_path[i, 5] == smooth_path[n-1, 5])
-
-  # R_t = np.array(R_t)
-  # R_t1 = np.array(R_t1)
-  # R_t2 = np.array(R_t2)
-  # print(R_t.shape)
-  # print(slack_var_1.shape)
-  # # constraints.append(R_t <= slack_var_1)
-  # # constraints.append(R_t >= -slack_var_1)
-  # # constraints.append((residual_t1 - residual_t) <= slack_var_2[i])
-  # # constraints.append((residual_t1 - residual_t) >= -slack_var_2[i])
-  # # constraints.append((residual_t2 - 2*residual_t1 + residual_t) <= slack_var_3[i])
-  # # constraints.append((residual_t2 - 2*residual_t1 + residual_t) >= -slack_var_3[i])
-  # # for i in range(n):
-  # constraints.append(slack_var_1 >= R_t)
   
   problem = cp.Problem(objective, constraints)
   problem.solve(parallel=True, verbose=True)
@@ -217,6 +205,16 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   print("optimal value", problem.value)
   print(smooth_path.value)
   return convert_path_to_homography(smooth_path.value, n)
+
+
+def compute_smooth_path_2(frame_dimensions, timewise_homographies=[], crop_ratio=0.8):
+  print("computing smooth path...")
+  n = len(timewise_homographies)
+  weight_constant = 10
+  weight_linear = 1
+  weight_parabolic =  100
+  affine_weights = np.transpose([1, 1, 100, 100, 100, 100])
+  return []
 
 
 def convert_path_to_homography(path, n):

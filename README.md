@@ -1,6 +1,6 @@
 # Video Stabilization
 
-This is an implementation of the methods presented in [this research paper](https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/37041.pdf) from google which aims to stabilise video using linear programming. 
+This is an implementation of the methods presented in [this research paper](https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/37041.pdf) from Google which aims to stabilise video using linear programming and L1 optimization of the optimal camera path. 
 
 ## Setup
 

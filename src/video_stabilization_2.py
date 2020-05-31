@@ -87,7 +87,7 @@ def compute_timewise_homographies(frames, features, outputMatches=False):
     if M is None:
       return timewise_homographies, i
     H = np.append(M, np.array([0, 0, 1]).reshape((1,3)), axis=0)
-    timewise_homographies.append(np.transpose(H))
+    timewise_homographies.append(H)
   return timewise_homographies, len(frames) - 1
 
 
@@ -109,11 +109,18 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
 
   n = len(timewise_homographies)
 
+  # 
+  # (dx, dy, a, b, c, d)
+  # 
+  # | a   b   dx  |
+  # | c   d   dy  |
+  # | 0   0   1   |
+  #
+
   weight_constant = 10
   weight_linear = 1
   weight_parabolic =  100
   affine_weights = np.transpose([1, 1, 100, 100, 100, 100])
-
   smooth_path = cp.Variable((n, 6))
   slack_var_1 = cp.Variable((n, 6))
   slack_var_2 = cp.Variable((n, 6))
@@ -162,9 +169,9 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
     B_t2 = np.array([smooth_path[i+2, 2], smooth_path[i+2, 4], 0, smooth_path[i+2, 3], smooth_path[i+2, 5], 0, smooth_path[i+2, 0], smooth_path[i+2, 1], 1]).reshape((3,3))
     B_t3 = np.array([smooth_path[i+3, 2], smooth_path[i+3, 4], 0, smooth_path[i+3, 3], smooth_path[i+3, 5], 0, smooth_path[i+3, 0], smooth_path[i+3, 1], 1]).reshape((3,3))
 
-    residual_t = timewise_homographies[i + 1] @ B_t1  - B_t
-    residual_t1 = timewise_homographies[i + 2] @ B_t2 - B_t1
-    residual_t2 = timewise_homographies[i + 3] @ B_t3 - B_t2
+    residual_t = np.transpose(timewise_homographies[i + 1]) @ B_t1  - B_t
+    residual_t1 = np.transpose(timewise_homographies[i + 2]) @ B_t2 - B_t1
+    residual_t2 = np.transpose(timewise_homographies[i + 3]) @ B_t3 - B_t2
     residual_t = np.array([residual_t[2, 0], residual_t[2, 1], residual_t[0, 0], residual_t[1, 0], residual_t[0, 1], residual_t[1, 1]])
     residual_t1 = np.array([residual_t1[2, 0], residual_t1[2, 1], residual_t1[0, 0], residual_t1[1, 0], residual_t1[0, 1], residual_t1[1, 1]])
     residual_t2 = np.array([residual_t2[2, 0], residual_t2[2, 1], residual_t2[0, 0], residual_t2[1, 0], residual_t2[0, 1], residual_t2[1, 1]])
@@ -174,13 +181,6 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
     #  -e_t1 <= R_t(p) < e_t1
     #  -e_t2 <= R_t1(p) - R_t(p) < e_t2
     #  -e_t3 <= R_t2(p) - 2R_t1(p) + R_t(p) < e_t3
-    # print(slack_var_1)
-    # print(slack_var_1[i, :])
-    # print(slack_var_1[i])
-    # print(np.array(slack_var_1[i, :]))
-    # print(np.array(slack_var_1[i]))
-    # print("-------------")
-    # constraints.append(residual_t <= np.array(slack_var_1[i, :]).reshape((6,)))
     for j in range(6):
       constraints.append(residual_t[j] <= slack_var_1[i, j])
       constraints.append(residual_t[j] >= -slack_var_1[i, j])
@@ -203,9 +203,9 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
 def convert_path_to_homography(path, n):
   smooth_homography = []
   for i in range(n):
-    smooth_homography.append(np.array([path[i, 2], path[i, 4], 0, 
-                                      path[i, 3], path[i, 5], 0, 
-                                      path[i, 0], path[i, 1], 1]).reshape(3, 3))
+    smooth_homography.append(np.array([path[i, 2], path[i, 3], path[i, 0], 
+                                        path[i, 4], path[i, 5], path[i, 1], 
+                                        0, 0, 1]).reshape(3, 3))
   return smooth_homography
 
 
@@ -225,18 +225,17 @@ def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
   dst_corners = np.array([[0, 0], [w, 0], [0, h], [w, h]]).astype(np.float32)
 
   new_frames = []
-  for i in range(1, n):
+  for i in range(n-1):
     projected_corners = []
     for corner in crop_corners:
-      projected_corners.append(corner.dot(smooth_path[i-1]))
+      projected_corners.append(smooth_path[i-1].dot(corner))
     src_corners = np.array([[projected_corners[0][0], projected_corners[0][1]],
                             [projected_corners[1][0], projected_corners[1][1]], 
                             [projected_corners[2][0], projected_corners[2][1]],
                             [projected_corners[3][0], projected_corners[3][1]]]).astype(np.float32)
-    
     # H, _ = cv.findHomography(src_corners, dst_corners, cv.RANSAC, 5.0)
-    H, _ = cv.estimateAffine2D(src_corners, dst_corners, method=cv.RANSAC)
-    warp_frame = cv.warpAffine(original_frames[i], H, (original_frames[i].shape[1], original_frames[i].shape[0]))
+    # H, _ = cv.estimateAffine2D(src_corners, dst_corners, method=cv.RANSAC)
+    warp_frame = cv.warpPerspective(original_frames[i], smooth_path[i], (original_frames[i].shape[1], original_frames[i].shape[0]))
     frame_filename = './data/output/frame' + str(i) + '.jpg'
     cv.imwrite(frame_filename, warp_frame)
     new_frames.append(warp_frame)
@@ -252,27 +251,33 @@ def graph_paths(timewise_homographies=[], smooth_path=[]):
   original_dy = np.zeros(n-1)
   smooth_x_path = np.zeros(n-1)
   smooth_y_path = np.zeros(n-1)
-  pt = np.array([0, 0, 1]).reshape((1,3))
+  smooth_dx_path = np.zeros(n-1)
+  smooth_dy_path = np.zeros(n-1)
+  pt = np.array([1, 1, 1])
   for i in range(n-1):
-    pt = pt.dot(timewise_homographies[i]).reshape((3,))
+    pt = timewise_homographies[i].dot(pt)
     original_x_path[i] = pt[0]
     original_y_path[i] = pt[1]
-    original_dx[i] = timewise_homographies[i][2,0]
-    original_dy[i] = timewise_homographies[i][2,1]
-    # smooth_pt = pt.reshape((1,3)).dot(smooth_path[i]).reshape((3,))
-    # smooth_x_path[i] = smooth_pt[0]
-    # smooth_y_path[i] = smooth_pt[1]
+    original_dx[i] = timewise_homographies[i][0,2]
+    original_dy[i] = timewise_homographies[i][1,2]
+    smooth_pt = smooth_path[i].dot(pt)
+    smooth_x_path[i] = smooth_pt[0]
+    smooth_y_path[i] = smooth_pt[1]
+    smooth_dx_path[i] = smooth_path[i][0,2]
+    smooth_dy_path[i] = smooth_path[i][1,2]
   fig, axs = plt.subplots(2,2)
   axs[0, 0].set_title('x path')
   axs[0, 0].plot(np.arange(0, n-1), original_x_path, '-r')
-  # axs[0].plot(np.arange(0, n-1), smooth_x_path, '-g')
+  axs[0, 0].plot(np.arange(0, n-1), smooth_x_path, '-g')
   axs[0, 1].set_title('y path')
   axs[0, 1].plot(np.arange(0, n-1), original_y_path, '-r')
-  # axs[1].plot(np.arange(0, n-1), smooth_y_path, '-')
+  axs[0, 1].plot(np.arange(0, n-1), smooth_y_path, '-g')
   axs[1, 0].set_title('dx path')
   axs[1, 0].plot(np.arange(0, n-1), original_dx, '-r')
+  axs[1, 0].plot(np.arange(0, n-1), smooth_dx_path, '-g')
   axs[1, 1].set_title('dy path')
   axs[1, 1].plot(np.arange(0, n-1), original_dy, '-r')
+  axs[1, 1].plot(np.arange(0, n-1), smooth_dy_path, '-g')
   plt.savefig('motion.png')
   plt.show()
 
@@ -284,7 +289,7 @@ def main():
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features)
   # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
   apply_smoothing(original_frames, timewise_homographies)
-  graph_paths(timewise_homographies)
+  graph_paths(timewise_homographies, timewise_homographies)
   
 
 if __name__ == "__main__":

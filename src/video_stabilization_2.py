@@ -2,6 +2,7 @@ import sys
 import os
 import glob
 import re
+import math
 import cvxpy as cp
 import numpy as np
 import cv2 as cv
@@ -92,14 +93,13 @@ def compute_timewise_homographies(frames, features, outputMatches=False):
 
 
 def get_corner_crop_pts(frame_dimensions, crop_ratio=0.8):
-  centre_pt_original = (round(frame_dimensions[1]/2), round(frame_dimensions[0]/2))     # (x, y)
-  new_dimensions = (frame_dimensions[1] * crop_ratio, frame_dimensions[0] * crop_ratio) # (w x h)
-
-  # crop corners
-  top_left = (centre_pt_original[0] - new_dimensions[0]/2, centre_pt_original[1] - new_dimensions[1]/2)
-  top_right = (centre_pt_original[0] + new_dimensions[0]/2, centre_pt_original[1] - new_dimensions[1]/2)
-  bottom_left = (centre_pt_original[0] - new_dimensions[0]/2, centre_pt_original[1] + new_dimensions[1]/2)
-  bottom_right = (centre_pt_original[0] + new_dimensions[0]/2, centre_pt_original[1] + new_dimensions[1]/2)
+  h, w, _ = frame_dimensions
+  centre_x, centre_y = (w/2, h/2)
+  displacement_x, displacement_y = (crop_ratio * w)/2, (crop_ratio * h)/2
+  top_left = (centre_x - displacement_x, centre_y - displacement_y)
+  top_right = (centre_x + displacement_x, centre_y - displacement_y)
+  bottom_left = (centre_x - displacement_x, centre_y + displacement_y)
+  bottom_right = (centre_x + displacement_x, centre_y + displacement_y)
   corners = [top_left, top_right, bottom_left, bottom_right]
   return corners
 
@@ -112,9 +112,9 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   # 
   # (dx, dy, a, b, c, d)
   # 
-  # | a   b   dx  |
-  # | c   d   dy  |
-  # | 0   0   1   |
+  # | a   b   dx  |       | a   c   0  |
+  # | c   d   dy  |   ->  | b   d   0  |
+  # | 0   0   1   |   T   | dx  dy  1  |
   #
 
   weight_constant = 10
@@ -162,8 +162,6 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
   constraints.append(slack_var_3 >= 0)
 
   for i in range(n - 3):
-    # format B_tx so that when multiplied by the timewise homography to get the residual the affine
-    # transform is kept
     B_t = np.array([smooth_path[i, 2], smooth_path[i, 4], 0, smooth_path[i, 3], smooth_path[i, 5], 0, smooth_path[i, 0], smooth_path[i, 1], 1]).reshape((3,3))
     B_t1 = np.array([smooth_path[i+1, 2], smooth_path[i+1, 4], 0, smooth_path[i+1, 3], smooth_path[i+1, 5], 0, smooth_path[i+1, 0], smooth_path[i+1, 1], 1]).reshape((3,3))
     B_t2 = np.array([smooth_path[i+2, 2], smooth_path[i+2, 4], 0, smooth_path[i+2, 3], smooth_path[i+2, 5], 0, smooth_path[i+2, 0], smooth_path[i+2, 1], 1]).reshape((3,3))
@@ -188,7 +186,7 @@ def compute_smooth_path(frame_dimensions, timewise_homographies=[], crop_ratio=0
       constraints.append((residual_t1[j] - residual_t[j]) >= -slack_var_2[i, j])
       constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) <= slack_var_3[i, j])
       constraints.append((residual_t2[j] - 2*residual_t1[j] + residual_t[j]) >= -slack_var_3[i, j])
-    
+      
   for i in range(n-3, n):
     constraints.append(smooth_path[i, 5] == smooth_path[n-1, 5])
   
@@ -213,7 +211,7 @@ def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
   print("smoothing new frames...")
 
   n = len(original_frames)
-  w, h, _ = original_frames[0].shape
+  h, w, _ = original_frames[0].shape
   centre_x, centre_y = (w/2, h/2)
   displacement_x, displacement_y = (crop_ratio * w)/2, (crop_ratio * h)/2
 
@@ -287,9 +285,9 @@ def main():
   original_frames = read_frames_from_dir(sys.argv[1])
   features = extract_features(original_frames)
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features)
-  # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
-  apply_smoothing(original_frames, timewise_homographies)
-  graph_paths(timewise_homographies, timewise_homographies)
+  smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
+  apply_smoothing(original_frames, smooth_path)
+  graph_paths(timewise_homographies, smooth_path)
   
 
 if __name__ == "__main__":

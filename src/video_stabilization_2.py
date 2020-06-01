@@ -50,7 +50,7 @@ def read_frames_from_dir(directory):
   filenames = glob.glob(directory+ "/*.jpg")
   filenames.sort(key=lambda f: int(re.sub('\D', '', f)))
   for file in filenames:
-    if count >= 150:
+    if count >= 300:
       break
     frames.append(cv.imread(file))
     count+=1
@@ -231,9 +231,9 @@ def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
                             [projected_corners[1][0], projected_corners[1][1]], 
                             [projected_corners[2][0], projected_corners[2][1]],
                             [projected_corners[3][0], projected_corners[3][1]]]).astype(np.float32)
-    # H, _ = cv.findHomography(src_corners, dst_corners, cv.RANSAC, 5.0)
+    H, _ = cv.findHomography(src_corners, dst_corners, cv.RANSAC, 5.0)
     # H, _ = cv.estimateAffine2D(src_corners, dst_corners, method=cv.RANSAC)
-    warp_frame = cv.warpPerspective(original_frames[i], smooth_path[i], (original_frames[i].shape[1], original_frames[i].shape[0]))
+    warp_frame = cv.warpPerspective(original_frames[i], H, (original_frames[i].shape[1], original_frames[i].shape[0]))
     frame_filename = './data/output/frame' + str(i) + '.jpg'
     cv.imwrite(frame_filename, warp_frame)
     new_frames.append(warp_frame)

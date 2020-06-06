@@ -70,8 +70,8 @@ def read_frames_from_dir(directory):
   filenames.sort(key=lambda f: int(re.sub('\D', '', f)))
   for file in filenames:
     # the following can be uncommmented to limit the number of frames read
-    # if count >= 300:
-    #   break
+    if count >= 300:
+      break
     frames.append(cv.imread(file))
     count+=1
   print ("read " + str(len(frames)) + " frames from directory")
@@ -315,8 +315,8 @@ def apply_smoothing(original_frames, smooth_path, crop_ratio=0.8):
                             [projected_corners[1][0], projected_corners[1][1]], 
                             [projected_corners[2][0], projected_corners[2][1]],
                             [projected_corners[3][0], projected_corners[3][1]]]).astype(np.float32)
-    H, _ = cv.findHomography(src_corners, dst_corners, cv.RANSAC, 5.0)
-    warp_frame = cv.warpPerspective(original_frames[i], H, (original_frames[i].shape[1], original_frames[i].shape[0]))
+    # H, _ = cv.findHomography(src_corners, dst_corners, cv.RANSAC, 5.0)
+    warp_frame = cv.warpPerspective(original_frames[i], smooth_path[i], (original_frames[i].shape[1], original_frames[i].shape[0]))
     frame_filename = './data/output/frame' + str(i) + '.jpg'
     cv.imwrite(frame_filename, warp_frame)
     new_frames.append(warp_frame)
@@ -347,28 +347,28 @@ def graph_paths(timewise_homographies=[], smooth_path=[]):
     pt = timewise_homographies[i].dot(pt)
     original_x_path[i] = pt[0]
     original_y_path[i] = pt[1]
-    original_dx[i] = timewise_homographies[i][0,2]
-    original_dy[i] = timewise_homographies[i][1,2]
+    # original_dx[i] = timewise_homographies[i][0,2]
+    # original_dy[i] = timewise_homographies[i][1,2]
     smooth_pt = smooth_path[i].dot(pt)
     smooth_x_path[i] = smooth_pt[0]
     smooth_y_path[i] = smooth_pt[1]
-    smooth_dx_path[i] = smooth_path[i][0,2]
-    smooth_dy_path[i] = smooth_path[i][1,2]
+    # smooth_dx_path[i] = smooth_path[i][0,2]
+    # smooth_dy_path[i] = smooth_path[i][1,2]
 
   # place data on the subplots
-  fig, axs = plt.subplots(2,2)
-  axs[0, 0].set_title('x path')
-  axs[0, 0].plot(np.arange(0, n-1), original_x_path, '-r')
-  axs[0, 0].plot(np.arange(0, n-1), smooth_x_path, '-g')
-  axs[0, 1].set_title('y path')
-  axs[0, 1].plot(np.arange(0, n-1), original_y_path, '-r')
-  axs[0, 1].plot(np.arange(0, n-1), smooth_y_path, '-g')
-  axs[1, 0].set_title('dx path')
-  axs[1, 0].plot(np.arange(0, n-1), original_dx, '-r')
-  axs[1, 0].plot(np.arange(0, n-1), smooth_dx_path, '-g')
-  axs[1, 1].set_title('dy path')
-  axs[1, 1].plot(np.arange(0, n-1), original_dy, '-r')
-  axs[1, 1].plot(np.arange(0, n-1), smooth_dy_path, '-g')
+  fig, axs = plt.subplots(1,2)
+  axs[0].set_title('x path')
+  axs[0].plot(np.arange(0, n-1), original_x_path, '-r')
+  axs[0].plot(np.arange(0, n-1), smooth_x_path, '-g')
+  axs[1].set_title('y path')
+  axs[1].plot(np.arange(0, n-1), original_y_path, '-r')
+  axs[1].plot(np.arange(0, n-1), smooth_y_path, '-g')
+  # axs[1, 0].set_title('dx path')
+  # axs[1, 0].plot(np.arange(0, n-1), original_dx, '-r')
+  # axs[1, 0].plot(np.arange(0, n-1), smooth_dx_path, '-g')
+  # axs[1, 1].set_title('dy path')
+  # axs[1, 1].plot(np.arange(0, n-1), original_dy, '-r')
+  # axs[1, 1].plot(np.arange(0, n-1), smooth_dy_path, '-g')
   plt.savefig('motion.png')
   plt.show()
 

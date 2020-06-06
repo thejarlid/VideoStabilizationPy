@@ -349,26 +349,26 @@ def graph_paths(timewise_homographies=[], smooth_path=[]):
     original_y_path[i] = pt[1]
     original_dx[i] = timewise_homographies[i][0,2]
     original_dy[i] = timewise_homographies[i][1,2]
-    # smooth_pt = smooth_path[i].dot(pt)
-    # smooth_x_path[i] = smooth_pt[0]
-    # smooth_y_path[i] = smooth_pt[1]
-    # smooth_dx_path[i] = smooth_path[i][0,2]
-    # smooth_dy_path[i] = smooth_path[i][1,2]
+    smooth_pt = smooth_path[i].dot(pt)
+    smooth_x_path[i] = smooth_pt[0]
+    smooth_y_path[i] = smooth_pt[1]
+    smooth_dx_path[i] = smooth_path[i][0,2]
+    smooth_dy_path[i] = smooth_path[i][1,2]
 
   # place data on the subplots
-  fig, axs = plt.subplots(1,2)
-  axs[0].set_title('x path')
-  axs[0].plot(np.arange(0, n-1), original_x_path, '-r')
-  # axs[0, 0].plot(np.arange(0, n-1), smooth_x_path, '-g')
-  axs[1].set_title('y path')
-  axs[1].plot(np.arange(0, n-1), original_y_path, '-r')
-  # axs[0, 1].plot(np.arange(0, n-1), smooth_y_path, '-g')
-  # axs[1, 0].set_title('dx path')
-  # axs[1, 0].plot(np.arange(0, n-1), original_dx, '-r')
-  # # axs[1, 0].plot(np.arange(0, n-1), smooth_dx_path, '-g')
-  # axs[1, 1].set_title('dy path')
-  # axs[1, 1].plot(np.arange(0, n-1), original_dy, '-r')
-  # axs[1, 1].plot(np.arange(0, n-1), smooth_dy_path, '-g')
+  fig, axs = plt.subplots(2,2)
+  axs[0, 0].set_title('x path')
+  axs[0, 0].plot(np.arange(0, n-1), original_x_path, '-r')
+  axs[0, 0].plot(np.arange(0, n-1), smooth_x_path, '-g')
+  axs[0, 1].set_title('y path')
+  axs[0, 1].plot(np.arange(0, n-1), original_y_path, '-r')
+  axs[0, 1].plot(np.arange(0, n-1), smooth_y_path, '-g')
+  axs[1, 0].set_title('dx path')
+  axs[1, 0].plot(np.arange(0, n-1), original_dx, '-r')
+  axs[1, 0].plot(np.arange(0, n-1), smooth_dx_path, '-g')
+  axs[1, 1].set_title('dy path')
+  axs[1, 1].plot(np.arange(0, n-1), original_dy, '-r')
+  axs[1, 1].plot(np.arange(0, n-1), smooth_dy_path, '-g')
   plt.savefig('motion.png')
   plt.show()
 
@@ -378,9 +378,9 @@ def main():
   original_frames = read_frames_from_dir(sys.argv[1])
   features = extract_features(original_frames)
   timewise_homographies, _ = compute_timewise_homographies(original_frames, features)
-  # smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
-  # apply_smoothing(original_frames, smooth_path)
-  graph_paths(timewise_homographies)
+  smooth_path = compute_smooth_path(original_frames[0].shape, timewise_homographies)
+  apply_smoothing(original_frames, smooth_path)
+  graph_paths(timewise_homographies, smooth_path)
   
 
 if __name__ == "__main__":

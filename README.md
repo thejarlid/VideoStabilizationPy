@@ -12,6 +12,8 @@ On the left is the original video and on the right is my smoothed clip.
 
 ![motion](/results/motion_300_600.png)
 
+![motion](/results/motion_0_150.png)
+
 ## Setup
 
 This repo uses python 3's virtual environment and pip to allow a sandbox environment of its own dependencies which have been frozen into the requirements.txt file. 

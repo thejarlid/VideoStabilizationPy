@@ -4,7 +4,7 @@ This is an implementation of the methods presented in [this research paper](http
 
 # Results
 
-![smooth](/results/stable_0_150.png)
+![smooth](/results/stable_0_150.gif)
 
 ![motion](/results/motion_300_600.png)
 

@@ -370,15 +370,17 @@ from pulp import LpMinimize, LpProblem, LpStatus, lpSum, LpVariable
 
 N = 6  # num slack variables per residual 6 in the affine case, 8 for homography
 
-w1 = 10  # constant weight (first derivative weight)
-w2 = 1  # linear weight (second derivative weight)
-w3 = 100  # parabolic weight (third derivative weight)
+# [constant weight (first derivative weight), linear weight (second derivative weight), parabolic weight (third derivative weight)]
+w = [10, 1, 100]
+
+# dx, dy, a, b, c, d
+c = [1, 1, 100, 100, 100, 100, 100]
 
 
 class Stabilizer:
     def __init__(self, args):
         self.input_file = args.in_file
-        self.output_file = args.output_file
+        self.output_file = args.out_file
         self.crop_ratio = args.crop_ratio
         self.plot = args.plot
 
@@ -390,12 +392,30 @@ class Stabilizer:
 
     def run(self):
         transforms = self.estimate_per_frame_motion_transforms()
+        self.compute_optimal_path(transforms)
 
     def stabilize_video(self):
         pass
 
-    def compute_optimal_path(self):
-        model = LpProblem(name="path optimization", sense=LpMinimize)
+    def compute_optimal_path(self, transforms):
+        model = LpProblem(name="path_optimization", sense=LpMinimize)
+
+        # 3nN slack variables
+        # e is a list per residual. There are N slack variables for each n frames
+        e = []
+        optimization_objective = 0
+        for i in range(3):
+            e.append(LpVariable.dicts(f"e{i}", ((j, k) for j in range(self.num_frames)
+                                                for k in range(N)), lowBound=0.0))
+
+        # minimize (c^t)*e
+        for i in range(3):
+            optimization_objective += w[i] * lpSum(e[i][j, k] * c[k]
+                                                   for j in range(self.num_frames) for k in range(N))
+
+        # smoothness constraints
+        # proximity constraints
+        # inclusion constraints
 
     # computes the linear motion model (affine transform homography) between each pair of frames and returns each in a list
     def estimate_per_frame_motion_transforms(self):

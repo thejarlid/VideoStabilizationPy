@@ -428,10 +428,21 @@ class Stabilizer:
 
     def run(self):
         transforms = self.estimate_per_frame_motion_transforms()
-        smooth_transforms = self.compute_optimal_path(transforms)
+        update_transforms = self.compute_optimal_path(transforms)
+        if not update_transforms:
+            return
+        self.stabilize_video(transforms, update_transforms)
 
-    def stabilize_video(self):
-        pass
+    def stabilize_video(self, transforms, update_transforms):
+        c_t = transforms[0].T
+        augmented_b = np.hstack((update_transforms[100].T, np.zeros((3, 1))))
+        smooth_transforms = [c_t @ augmented_b]
+        for i in range(1, self.num_frames):
+            augmented_f = np.hstack((transforms[i].T, np.zeros((3, 1))))
+            c_t = c_t @ augmented_f
+            augmented_b = np.hstack((update_transforms[i].T, np.zeros((3, 1))))
+            smooth_transforms.append((c_t @ augmented_b).T)
+            # print(smooth_transforms[-1])
 
     # returns a list of points of the four corners of the crop window bounds
     def get_crop_bounds(self):
@@ -448,6 +459,7 @@ class Stabilizer:
         ]
 
     # performs the linear programming optimization algorithm over the computed transforms
+    # returns a list of transforms B which are the update transforms
     def compute_optimal_path(self, transforms):
         model = LpProblem(name="path_optimization", sense=LpMinimize)
 
@@ -512,7 +524,8 @@ class Stabilizer:
             # form more rigidity by limiting the amount of skew and non-
             # uniform scale.
             model += 0.9 <= p[i, 2] <= 1.1
-            model += 0.9 <= p[i, 5] <= 1.1
+            model += p[i, 5] >= 0.9
+            model += p[i, 5] <= 1.1
             model += -0.1 <= p[i, 3] <= 0.1
             model += -0.1 <= p[i, 4] <= 0.1
             model += -0.1 <= p[i, 3] + p[i, 4] <= 0.1
@@ -535,8 +548,10 @@ class Stabilizer:
                     np.array([[p[i, 2].varValue, p[i, 4].varValue, p[i, 0].varValue],
                               [p[i, 3].varValue, p[i, 5].varValue, p[i, 1].varValue]])
                 )
+        else:
+            print("unable to find solution")
+            return None
 
-        print(len(smooth_transforms))
         return smooth_transforms
 
     # computes the linear motion model (affine transform homography) between each pair of frames and returns each in a list
@@ -546,10 +561,10 @@ class Stabilizer:
         # first transform is just the identity matrix
         transforms = [np.eye(3, 3)]
 
-        feature_params = dict(maxCorners=500,
+        feature_params = dict(maxCorners=200,
                               qualityLevel=0.01,
-                              minDistance=10,
-                              blockSize=5)
+                              minDistance=30,
+                              blockSize=3)
         lk_params = dict(winSize=(20, 20),
                          maxLevel=3,
                          criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
@@ -561,9 +576,10 @@ class Stabilizer:
             print("unable to extract first frame")
             sys.exit()
         prev_frame_grey = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-        prev_feature_points = cv2.goodFeaturesToTrack(
-            prev_frame_grey, mask=None, **feature_params)
+
         for i in range(self.num_frames - 1):
+            prev_feature_points = cv2.goodFeaturesToTrack(
+                prev_frame_grey, mask=None, **feature_params)
             success, curr_frame = video.read()
             if not success:
                 print(f"failed to read frame {i} aborting")
@@ -571,7 +587,7 @@ class Stabilizer:
             curr_frame_grey = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
             # calculate optical flow
             curr_feature_points, status, err = cv2.calcOpticalFlowPyrLK(
-                prev_frame_grey, curr_frame_grey, prev_feature_points, None, **lk_params)
+                prev_frame_grey, curr_frame_grey, prev_feature_points, None)
 
             if curr_feature_points is None:
                 print(
@@ -589,10 +605,9 @@ class Stabilizer:
 
             # compute the affine transform between matched prev and curr features
             M, _ = cv2.estimateAffine2D(
-                valid_prev_feature_points, valid_curr_feature_points, method=cv2.RANSAC)
+                valid_curr_feature_points, valid_prev_feature_points, method=cv2.RANSAC)
             transforms.append(M)
             prev_frame_grey = curr_frame_grey.copy()
-            prev_feature_points = valid_curr_feature_points.reshape(-1, 1, 2)
         self.num_frames = len(transforms)
         return transforms
 

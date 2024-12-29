@@ -377,6 +377,42 @@ w = [10, 1, 100]
 c = [1, 1, 100, 100, 100, 100, 100]
 
 
+# returns the parameterized vector result of a
+# matrix multiplication between F and B.
+# F = [a b dx; c d dy]
+# p = [p0, p1, p2, p3, p4, p5] corresponding to (dx, dy, a, b, c, d)
+#
+# F is a 2 x 3 matrix which we will be treated as an 3x3 augmented matrix:
+# [a b dx]
+# [c d dy]
+# [0 0 1 ]
+#
+# B will be treated as a 3x3 augmented matrix constructed from p
+# [p2 p3 p0]
+# [p4 p5 p1]
+# [0  0  1 ]
+#
+# The matrix result will be treated as F.T @ B.T
+# [a * p2 + c * p3           a * p4 + c * p5           0]
+# [b * p2 + d * p3           b * p4 + d * p5           0]
+# [dx * p2 + dy * p3 + p0    dx * p4 + dy * p5 + p1    1]
+#
+# Transposing the above we get an affine projection which will
+# be returned in the same format as how B is constructed
+# of the input list
+# [[2, 0], [2, 1], [0, 0], [1, 0], [0, 1], [1, 1]]
+#    dx      dy      a       b       c       d
+def get_parameterized_matmult(F, p):
+    return [
+        F[0, 2] * p[2] + F[1, 2] * p[3] + p[0],
+        F[0, 2] * p[4] + F[1, 2] * p[5] + p[1],
+        F[0, 0] * p[2] + F[1, 0] * p[3],
+        F[0, 1] * p[2] + F[1, 1] * p[3],
+        F[0, 0] * p[4] + F[1, 0] * p[5],
+        F[0, 1] * p[4] + F[1, 1] * p[5]
+    ]
+
+
 class Stabilizer:
     def __init__(self, args):
         self.input_file = args.in_file
@@ -392,37 +428,123 @@ class Stabilizer:
 
     def run(self):
         transforms = self.estimate_per_frame_motion_transforms()
-        self.compute_optimal_path(transforms)
+        smooth_transforms = self.compute_optimal_path(transforms)
 
     def stabilize_video(self):
         pass
 
+    # returns a list of points of the four corners of the crop window bounds
+    def get_crop_bounds(self):
+        crop_w = round(self.width * self.crop_ratio)
+        crop_h = round(self.height * self.crop_ratio)
+        diff_w = self.width - crop_w
+        diff_h = self.height - crop_h
+        origin = (round(diff_w/2), round(diff_h/2))
+        return [
+            origin,
+            (origin[0] + crop_w, origin[1]),
+            (origin[0], origin[1] + crop_h),
+            (origin[0] + crop_w, origin[1] + crop_h)
+        ]
+
+    # performs the linear programming optimization algorithm over the computed transforms
     def compute_optimal_path(self, transforms):
         model = LpProblem(name="path_optimization", sense=LpMinimize)
+
+        # parameterization vector for each frame (dx, dy, a, b, c, d)
+        p = LpVariable.dicts("p", ((i, j)
+                             for i in range(self.num_frames) for j in range(N)))
 
         # 3nN slack variables
         # e is a list per residual. There are N slack variables for each n frames
         e = []
-        optimization_objective = 0
         for i in range(3):
             e.append(LpVariable.dicts(f"e{i}", ((j, k) for j in range(self.num_frames)
                                                 for k in range(N)), lowBound=0.0))
 
         # minimize (c^t)*e
+        # O(P) = w1|D(P)| + w2|D2(P)| + w3|D3(P)|
+        optimization_objective = 0
         for i in range(3):
             optimization_objective += w[i] * lpSum(e[i][j, k] * c[k]
                                                    for j in range(self.num_frames) for k in range(N))
+        model += optimization_objective
 
-        # smoothness constraints
-        # proximity constraints
-        # inclusion constraints
+        crop_bounds = self.get_crop_bounds()
+        for i in range(self.num_frames):
+            if i < self.num_frames - 3:
+                # smoothness constraints
+                # −e1_t ≤ R_t(p) ≤ e1_t
+                # −e2_t ≤ R_t+1(p) − R_t(p) ≤ e2_t
+                # −e3_t ≤ R_t+2(p) − 2R_t+1(p) + R_t(p) ≤ e3_t
+                # ei_t ≥ 0 <- satisfied by lowBound on LpVariable
+                #
+                # R = F_(t+1) * B_(t+1) - p_t
+                Mt = get_parameterized_matmult(
+                    transforms[i+1], [p[i+1, j] for j in range(N)])
+                Mt1 = get_parameterized_matmult(
+                    transforms[i+2], [p[i+2, j] for j in range(N)])
+                Mt2 = get_parameterized_matmult(
+                    transforms[i+3], [p[i+3, j] for j in range(N)])
+
+                r_t = [Mt[j] - p[i, j] for j in range(N)]
+                r_t1 = [Mt1[j] - p[i + 1, j] for j in range(N)]
+                r_t2 = [Mt2[j] - p[i + 2, j] for j in range(N)]
+
+                for j in range(N):
+                    model += -1 * e[0][i, j] <= r_t[j]
+                    model += r_t[j] <= e[0][i, j]
+
+                    model += -1 * e[1][i, j] <= r_t1[j] - r_t[j]
+                    model += r_t1[j] - r_t[j] <= e[1][i, j]
+
+                    model += -1 * e[2][i, j] <= r_t2[j] - 2 * r_t1[j] + r_t[j]
+                    model += r_t2[j] - 2 * r_t1[j] + r_t[j] <= e[2][i, j]
+
+            # proximity constraints
+            # lb ≤ Upt ≤ ub
+            # 0.9 ≤ at,dt ≤ 1.1,
+            # −0.1 ≤ bt,ct ≤ 0.1
+            # −0.05 ≤ bc + ct ≤ 0.05
+            # −0.1 ≤ at − dt ≤0.1
+            # The first two constraints limit the range of change in
+            # zoom and rotation, while the latter two give the affine trans-
+            # form more rigidity by limiting the amount of skew and non-
+            # uniform scale.
+            model += 0.9 <= p[i, 2] <= 1.1
+            model += 0.9 <= p[i, 5] <= 1.1
+            model += -0.1 <= p[i, 3] <= 0.1
+            model += -0.1 <= p[i, 4] <= 0.1
+            model += -0.1 <= p[i, 3] + p[i, 4] <= 0.1
+            model += -0.05 <= p[i, 2] - p[i, 5] <= 0.05
+
+            # Inclusion Constraints
+            # (0, 0)T ≤ CR_i * pt ≤ (w, h)T
+            for x, y in crop_bounds:
+                model += 0 <= p[i, 0] + p[i, 2] * x + p[i, 3] * y <= self.width
+                model += 0 <= p[i, 1] + p[i, 4] * \
+                    x + p[i, 5] * y <= self.height
+
+        print("Running solver")
+        model.solve()
+        smooth_transforms = []
+        if model.status == 1:
+            print("solution found")
+            for i in range(self.num_frames):
+                smooth_transforms.append(
+                    np.array([[p[i, 2].varValue, p[i, 4].varValue, p[i, 0].varValue],
+                              [p[i, 3].varValue, p[i, 5].varValue, p[i, 1].varValue]])
+                )
+
+        print(len(smooth_transforms))
+        return smooth_transforms
 
     # computes the linear motion model (affine transform homography) between each pair of frames and returns each in a list
     def estimate_per_frame_motion_transforms(self):
         video = cv2.VideoCapture(self.input_file)
 
         # first transform is just the identity matrix
-        transforms = [np.eye(2, 3)]
+        transforms = [np.eye(3, 3)]
 
         feature_params = dict(maxCorners=500,
                               qualityLevel=0.01,
@@ -446,7 +568,6 @@ class Stabilizer:
             if not success:
                 print(f"failed to read frame {i} aborting")
                 sys.exit()
-
             curr_frame_grey = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
             # calculate optical flow
             curr_feature_points, status, err = cv2.calcOpticalFlowPyrLK(
@@ -472,7 +593,7 @@ class Stabilizer:
             transforms.append(M)
             prev_frame_grey = curr_frame_grey.copy()
             prev_feature_points = valid_curr_feature_points.reshape(-1, 1, 2)
-
+        self.num_frames = len(transforms)
         return transforms
 
 

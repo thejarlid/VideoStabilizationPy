@@ -41,3 +41,6 @@ optional arguments:
                         crop ratio for the crop window [0, 1]
   -p, --plot            flag for whether to save and output the plot graphs
 ```
+
+# Credits
+Matlab implementation which influenced some of the decisions in this implementation https://github.com/ishit/L1Stabilizer/tree/master

@@ -1,8 +1,10 @@
 # Video Stabilization
 
-This is an implementation of the methods presented in [this research paper](https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/37041.pdf) from Google which aims to stabilise video using linear programming and L1 optimization of the optimal camera path. I also wrote up a blog post on this paper and specifically my experience implementing this [here](https://thejarlid.github.io/Auto_Directed_Video_Stabilization/). 
+This is an implementation of the methods presented in [this research paper](https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/37041.pdf) from Google which aims to stabilise video using linear programming and L1 optimization of the optimal camera path.
 
-This implementation was done as a self study on the research paper to better understand the methods proposed. The actual tool is not very efficient and work best when run on a small set of frames ~150-300.
+Beginning originally as a computer vision class final project in 2018 I had the idea to take frame by frame homographies, plot the x and y jitter, and then take a gausian filter over some window of frames to produce a smooth path. This had flaws in stabilization as it got rid of high frequency jitter that spanned a small window of frames but didn't produce inherently smooth videos. I later discovered this paper which fits constant, linear, and parabolic paths to the overall motion.
+
+This implementation was done as a self study on the research paper to better understand the methods proposed
 
 # Results
 
@@ -10,18 +12,30 @@ On the left is the original video and on the right is my smoothed clip.
 
 ![smooth](/results/results.gif)
 
-![motion](/results/motion_300_600.png)
+![motion](/results/path.png)
 
-![motion](/results/motion_0_150.png)
+## Usage
 
-## Setup
-
-This repo uses python 3's virtual environment and pip to allow a sandbox environment of its own dependencies which have been frozen into the requirements.txt file. 
-
-Inside the cloned directory run the following in the terminal:
-
+### Setup
 ```bash
 python3 -m venv venv/               # you can change venv/ to whatever you want your virtual environment directory to be called
 source venv/bin/activate            # to start the virtual environment 
 pip install -r requirements.txt     # get the dependencies 
+```
+
+```bash
+python3 src/video_stabilization.py input.mp4 -o output.mp4 -c 0.9
+
+usage: L1 Video Stabilizer [-h] [-o OUT_FILE] [-c CROP_RATIO] [-p] in_file
+
+positional arguments:
+  in_file               input video file to stabilize
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -o OUT_FILE, --out_file OUT_FILE
+                        name of the output file default will be the input file name with the suffix _stable
+  -c CROP_RATIO, --crop_ratio CROP_RATIO
+                        crop ratio for the crop window [0, 1]
+  -p, --plot            flag for whether to save and output the plot graphs
 ```

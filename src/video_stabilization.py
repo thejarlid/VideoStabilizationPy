@@ -64,8 +64,8 @@ class Stabilizer:
         axs[1].set_xlabel('Frame')
         axs[1].set_ylabel('y coord')
         axs[1].legend(['Original', 'Smooth'])
-        plt.show()
         plt.savefig("path.png")
+        plt.show()
         plt.close()
 
     def stabilize_video(self, update_transforms):

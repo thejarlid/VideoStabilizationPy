@@ -14,14 +14,16 @@ On the left is the original video and on the right is my smoothed clip.
 
 ![motion](/results/path.png)
 
-## Usage
 
-### Setup
+## Setup
+
 ```bash
 python3 -m venv venv/               # you can change venv/ to whatever you want your virtual environment directory to be called
 source venv/bin/activate            # to start the virtual environment 
 pip install -r requirements.txt     # get the dependencies 
 ```
+
+## Usage
 
 ```bash
 python3 src/video_stabilization.py input.mp4 -o output.mp4 -c 0.9

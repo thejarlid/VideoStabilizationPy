@@ -316,20 +316,6 @@ def get_parameterized_matmult(F, p):
     ]
 
 
-def setup_folders():
-    try:
-        if not os.path.exists('data'):
-            os.makedirs('data')
-        if not os.path.exists('data/frames'):
-            os.makedirs('data/frames')
-        if not os.path.exists('data/output'):
-            os.makedirs('data/output')
-        if not os.path.exists('data/matches'):
-            os.makedirs('data/matches')
-    except OSError:
-        print('Error: Creating directory')
-
-
 def parse_args():
     parser = argparse.ArgumentParser(prog='L1 Video Stabilizer')
     parser.add_argument(
@@ -357,6 +343,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    setup_folders()
     stabilizer = Stabilizer(args)
     stabilizer.run()
